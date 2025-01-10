@@ -1,0 +1,18 @@
+{
+  "name": "build",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "pull": "mode=pullRuntim node index.js",
+    "push": "mode=pushFromFile nodemon --watch code/runtime.lua index.js"
+  },
+  "keywords": [],
+  "author": "Patrick Gilligan",
+  "license": "MIT",
+  "description": "",
+  "dependencies": {
+    "ide_qsys": "^1.5.7",
+    "nodemon": "^3.1.9"
+  }
+}

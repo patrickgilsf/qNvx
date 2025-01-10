@@ -1,0 +1,242 @@
+-- Control Crestron NVX Encoders and Decoders with Q-Sys
+-- @Author: Patrick Gilligan <https://github.com/patrickgilsf>
+-- Spring 2024
+
+PluginInfo = {
+  Name = "qNVX",
+  Version = "1.0",
+  BuildVersion = "1.0.0.1",
+  Id = "239876235023784",
+  Author = "Patrick Gilligan",
+  Description = "Control Crestron NVX Encoders and Decoders with Q-Sys"
+}
+
+font = "OpenSans"
+
+function GetColor()
+  return { 153, 153, 153 }
+end
+
+function GetPrettyName(props)
+  return string.format("qNVX v%s", PluginInfo.Version)
+end
+
+Pages = {"Control", "Setup"}
+function GetPages()
+  local pages = {}
+  for k,v in pairs(Pages) do table.insert(pages, {name = v}) end
+  return pages
+end
+
+function GetProperties()
+  return {
+    {Name = "NVX", Type = "enum", Choices = {"Encoder", "Decoder"}, Value = "Encoder"}
+  }
+end
+
+function GetControls(props)
+  local CurrentPage=Pages[props["page_index"].Value]
+  local enc = {
+    {Name = "DiscoverStreams", ControlType = "Button", ButtonType = "Trigger", Icon = "Web", Count = 1, UserPin = true, PinStyle = "None"},
+    {Name = "CopyStreams", ControlType = "Button", ButtonType = "Trigger", Icon = "Download", Count = 4},
+    {Name = "CurrentStreams", ControlType = "Text", DefaultValue = "Press icon to the left to discover streams...."},
+    {Name = "StreamName", ControlType = "Text", Count = 4},
+    {Name = "RouteDiscover", ControlType = "Button", ButtonType = "Trigger"},
+    {Name = "Route", ControlType = "Button", ButtonType = "Trigger", Count = 4},
+    {Name = "PreviewDiscover", ControlType = "Button", ButtonType = "Trigger", Icon = "Eye"},
+    {Name = "PreviewRoute", Controltype = "Button", ButtonType = "Trigger", Count = 4, Icon = "Eye"},
+    {Name = "PreviewInput", ControlType = "Button", ButtonType = "Trigger"},
+    {Name = "PreviewOutput", ControlType = "Button", ButtonType = "Trigger"},
+    {Name = "PreviewPane", ControlType = "Button", ButtonType = "Trigger"}
+  }
+  local dec = {}
+  if CurrentPage == "Control" then
+    if props["NVX"].Value == "Encoder" then return enc else return dec end
+  elseif CurrentPage == "Setup" then
+    return {}
+  end
+end
+
+function GetControlLayout(props)
+  --dynamic controls
+  --single
+  local layout = {
+    DiscoverStreams = {PrettyName = "Discover Streams", Style = "Button", Position = {15,58}, Size = {36,16}},
+    CurrentStreams = {Style = "ComboBox", Position = {51, 58}, Size = {133, 14}},
+    RouteDiscover = {Style = "Button", Position = {187,56}, Size = {71,16}},
+    PreviewDiscover = {Style = "Button", Position = {259,56}, Size = {49,16}},
+    PreviewInput = {Style = "Button", Position = {58,220}, Size = {71,16}},
+    PreviewOutput = {Style = "Button", Position = {191,220}, Size = {71,16}},
+    PreviewPane = {Style = "Button", Position = {15,236}, Size = {289,163}}
+  }
+  --multiple
+  local posY = 110
+  for i = 1,4 do 
+    --copy streams
+    layout["CopyStreams "..i] = {
+      Style = "Button", Position = {15,posY}, Size = {36,16}
+    }
+    --current streams
+    layout["StreamName "..i] = {
+      Style = "Text", Position = {51,posY}, Size = {133,16}
+    }
+    layout["Route "..i] = {
+      Style = "Button", Position = {187, posY}, Size = {71,16}, UnlinkOffColor = true
+    }
+    layout["PreviewRoute "..i] = {
+      Style = "Button", Position = {259, posY}, Size = {49,16}, UnlinkOffColor = true
+    }
+    posY = posY + 22
+  end
+
+
+  --aesthetic controls
+  local graphics = {
+    {Position = {0,0}, Size = {316,412}, Fill = {51,51,51}, Type = "GroupBox", CornerRadius = 8, HTextAlign = "Center"},
+    {Position = {19,20}, Size = {289,22}, TextColor = {255,255,255}, Type = "Header", Text = "Discover Streams"},
+    {Position = {15,74}, Size = {289,22}, TextColor = {255,255,255}, Type = "Header", Text = "Collect Routes"},
+    {Position = {15,198}, Size = {289,22}, TextColor = {255,255,255}, Type = "Header", Text = "Preview"}
+  }
+  --add default font
+  for _, el in pairs(layout) do el.Font = font end
+  for _, el in pairs(graphics) do el.Font = font end
+  --return tables
+  return layout, graphics
+end
+
+if Controls then
+  --initializations
+  rj = require("rapidjson")
+  Controls.CurrentStream.String = ""
+  Controls.ManualStream.String = ""
+  --variables
+  v = {
+    ip = Controls.IP,
+    un = Controls.Username,
+    pw = Controls.Password,
+    fb = Controls.DeviceFB,
+    auth = Controls.Authorized,
+    stat = Controls.Status,
+    rBtns = Controls.RouteButton
+  }
+  v.Url = 'https://'..v.ip.String..'/'
+  --functions
+  f = {
+    dly = function(func, time)
+      Timer.CallAfter(function() func() end, time) 
+    end
+  }
+  --auth
+  auth = {
+    header = {
+      ["Content-Type"] = "application/json"
+    },
+    options = {
+      Url = 'https://'..v.ip.String..'/userlogin.html',
+      Method = 'POST',
+      Headers = {["Content-Type"] = "application/json"},
+      Data = 'login='..v.un.String..'&&passwd='..v.pw.String,
+    },
+    update = function(s)
+      if not s then s = 2 end 
+      if s == 1 then v.stat.Value = 5 end
+      v.stat.Value = s
+      v.auth.Value = s
+    end,
+    check = function(self, data)
+      self.update(1)
+      if not self.update(data:match("<!DOCTYPE html>")) then
+        print("not authenticated")
+        self.update(2)
+        return false
+      else
+        self.update(0)
+        return true
+      end
+    end,
+    login = function(self)
+      local cookieStr
+      local response = function(t,c,d,e,h)
+        auth:check(d)
+        if c ~= 200 then print("Authentication error with code"..c) return false end
+        if not h["Set-Cookie"] then print('missing auth cookie') return false end
+        for k,v in pairs(h["Set-Cookie"]) do
+          cookieStr = cookieStr..v
+        end
+        self.header["Cookie"]= cookieStr
+      end
+      self.options[EventHandler]= response
+      HttpClient.Upload(options)
+      --keepalive
+      f.dly(self.login, 300)
+    end
+  }
+  --tables
+  t = {
+    Streams = {},
+    FilteredStreams = {},
+    Receivers = {},
+    Get = {
+      Url = v.Url,
+      Headers = auth.header,
+      Timeout = 10
+    }
+  }
+  --functions called on runtime
+  init = {
+    getStreams = function()
+      local response = function(t,c,d,e,h)
+        auth:check(d)
+        if c ~= 200 then print("Authentication error with code: "..c) return false end
+        for idx, stream in pairs(rj.decode(d).Device.DiscoveredStreams.Streams) do
+          table.insert(t.Streams, {SessionName = stream.SessionName, Address = stream.Address:match("%d+%.%d+%.%d+%.%d+"), ID = idx, Type = "Encoder"})
+        end
+      end
+      local options = t.Get
+      options.Url = t.Get.Url.."Device/DiscoveredStreams"
+      options.EventHandler = response
+      HttpClient.Download(options)
+    end
+  }
+  init.makeButtons = function()
+    if #t.Streams == 0 then 
+      init.getStreams()
+      f.dly(function() print("attempting to initialize...") end, 1)
+    else
+      -- for idx, stream in pairs(t.Streams) do
+      for idx, btn in pairs(v.rBtns) do
+        btn.Legend = t.Streams[idx].SessionName or ""
+      end
+    end        
+  end
+
+  -- f.routeAV = function(route)
+  --   HttpClient.Upload {
+  --     Url = nvxBaseUrl.."Device/AvRouting/Routes",
+  --     Method = "POST", 
+  --     Data = [=[{"Device": {"AvRouting": {"Routes": [{"VideoSource": "]=]..route..[=["}]}}}]=],
+  --     Headers = authHeader,
+  --     EventHandler = function(t,c,d,e,h)
+  --       if c ~= 200 then print('Error with code: '..c) else
+  --         AuthCheck(d)
+  --         PollRoute()
+  --       end
+  --     end
+  --   }
+  -- end
+
+
+
+
+
+
+  ----
+  function Init()
+    for name, fn in pairs(init) do
+      fn()
+    end
+  end
+
+
+  Init()
+end
