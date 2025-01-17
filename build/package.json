@@ -4,14 +4,17 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "pull": "mode=pullRuntim node index.js",
-    "push": "mode=pushFromFile nodemon --watch code/runtime.lua index.js"
+    "pull": "mode=pullRuntime node index.js",
+    "push": "mode=pushFromFile nodemon --watch code/runtime.lua --watch index.js",
+    "config:get": "mode=getConfig node index.js"
   },
   "keywords": [],
   "author": "Patrick Gilligan",
   "license": "MIT",
   "description": "",
   "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
     "ide_qsys": "^1.5.7",
     "nodemon": "^3.1.9"
   }

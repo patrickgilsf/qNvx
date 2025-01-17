@@ -26,19 +26,54 @@ const pullRuntime = async () => {
 }
 
 const pushFromFile = async () => {
-  let test = await core.update('./code/runtime.lua');
-  console.log(test);
-  return test.params.Status.Code == 0 ? "Successful update!" : "error updating!"
+  const path = './code/runtime.lua';
+  let updatedCodeToCore, errorCount, logs;
+  try {
+    //update file
+    updatedCodeToCore = await core.update(path);
+
+    //gather error count
+    errorCount = await core.retrieve({type: "script.error.count"});
+
+    //print output
+    if (updatedCodeToCore.params.Status.Code == 0) {
+      console.log(`${path} updated to ${core.ip} with $ ${errorCount.Controls[0].Value} errors\n`);
+    };
+
+    //gather and print logs
+    logs = await core.retrieve({type: "log.history"});
+    for (const str of logs.Controls[0].Strings ) {
+      if (str == "" || !str) continue;
+      console.log(str.replace(/\d+-\d+-\d+\w+:\d+:\d+\.\d\d\d/, '')); //removes timestamp
+    };
+
+    return {
+      code: updatedCodeToCore.params.Status.Code == 0 ? 200 : 500,
+      errors: errorCount
+    }
+  } catch(e) {
+    console.error(e);
+  }
 };
 
+const getConfig = async () => {
+  const code = await core.retrieve();
+  console.log(code);
+  return code;
+}
 
 switch(process.env.mode) {
-  case "pullRuntim":
+  case "pullRuntime":
     pullRuntime();
     break;
   case "pushFromFile":
-    // console.log(await pushFromFile());
-    console.log(core);
+    await pushFromFile();
+    break;
+  case "getConfig": 
+    await getConfig();
+    break;
+  defualt: 
+    console.log(`you need to pass a mode argument to this script`);
     break;
 }
 
