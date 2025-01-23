@@ -109,6 +109,8 @@ end
 --login
 function N:login(o)
   o = o or {}
+  local credentialsFilledOut = self.ip ~= "" and self.un ~= "" and self.pw ~= ""
+  if not credentialsFilledOut then print('Fill in credentials to initialize') return false end
   --login the first time
   HttpClient.Upload({
     Url = self.Urls.login,
@@ -148,6 +150,7 @@ function N:getConfigurationData(o)
       end
       if o.verbose then print(d) end
       if c ~= 200 then
+        print(self.ip, self.un, self.pw)
         if self.ip then print("Error getting data from "..url.." with code: "..c..":") end
         print(e) 
       else
@@ -282,13 +285,9 @@ end
 
 --route video from streams, according to uuid
 function N:routeFromStream(uuid)
-  -- self:switchInput("Stream")
+  self:switchInput("Stream")
   local data = [=[{"Device": {"AvRouting": {"Routes": [{"VideoSource": "]=]..uuid..[=["}]}}}]=]
-  self:postData("/AvRouting/Routes", data, {
-    eh = function(t,c,d,e,h)
-      -- NVX:updatePreviewWindow()
-    end
-  })
+  self:postData("/AvRouting/Routes", data)
   self:getConfigurationData({
     eh = function(t,c,d,e,h)
       self:updateDecoderValues()
@@ -343,7 +342,7 @@ function N:updatePreviewWindow(o)
   o = o or {}
   if not self.config then print('config file needs to be loaded to upload preview window') return false end
   self:getConfigurationData({
-    subPath = "Preview",
+    -- subPath = "Preview",
     eh = function()
       self:assignPreviewToWindow(o)
     end
