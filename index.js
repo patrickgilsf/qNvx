@@ -4,14 +4,14 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 let core = new Core({
-  username: "QSC",
-  pw: process.env.qsysPw,
-  ip: "192.168.42.93",
-  comp: "NVX_dev"
+  username: process.env.qUsername,
+  pw: process.env.qPassword,
+  ip: "192.168.42.148",
+  comp: "qNVX"
 });
 
 const pullRuntime = async () => {
-  console.log("pulling runtime...");
+  console.log(`Pulling code from ${core.comp}...`);
   let comps = await core.retrieve();
   let rtn = {};
 
@@ -23,36 +23,32 @@ const pullRuntime = async () => {
   };
   if (rtn.success) console.log("runtime updated!");
   return rtn;
-}
+};
 
 const pushFromFile = async () => {
-  const path = './code/runtime.lua';
-  let updatedCodeToCore, errorCount, logs;
+  const path = `./code/runtime.lua`;
+  let updatedToCore, errorCount, logs;
   try {
-    //update file
-    updatedCodeToCore = await core.update(path);
+      //update file
+      updatedToCore = await core.update(path);
 
-    //gather error count
-    errorCount = await core.retrieve({type: "script.error.count"});
+      //get error count
+      errorCount = await core.retrieve({
+          type: "script.error.count"
+      });
 
-    //print output
-    if (updatedCodeToCore.params.Status.Code == 0) {
-      console.log(`${path} updated to ${core.ip} with $ ${errorCount.Controls[0].Value} errors\n`);
-    };
+      //print output
+      // if (updatedToCore.params.Status.Code == 0) {
+          console.log(`${path} updated to ${core.ip} with ${errorCount.Controls[0].Value} errors\n`);
+      // };
 
-    //gather and print logs
-    logs = await core.retrieve({type: "log.history"});
-    for (const str of logs.Controls[0].Strings ) {
-      if (str == "" || !str) continue;
-      console.log(str.replace(/\d+-\d+-\d+\w+:\d+:\d+\.\d\d\d/, '')); //removes timestamp
-    };
-
-    return {
-      code: updatedCodeToCore.params.Status.Code == 0 ? 200 : 500,
-      errors: errorCount
-    }
-  } catch(e) {
-    console.error(e);
+      logs = await core.retrieve({type: "log.history"});
+      for (const str of logs.Controls[0].Strings) {
+          if (str == "" || !str) continue;
+          console.log(str.replace(/\d+-\d+-\d+\w+:\d+:\d+\.\d\d\d/, '')); //removes timestamp
+      }
+  } catch (e) {
+      console.log(e);
   }
 };
 
@@ -64,7 +60,7 @@ const getConfig = async () => {
 
 switch(process.env.mode) {
   case "pullRuntime":
-    pullRuntime();
+    await pullRuntime();
     break;
   case "pushFromFile":
     await pushFromFile();

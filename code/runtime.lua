@@ -43,25 +43,46 @@ function N:new(o)
   }
   setmetatable(o, self)
   self.__index = self
-  print('NVX instance created with ip address '..o.ip.."!")
   return o
 end
 
 function N:authFb(s)
   self:updateAccordingToValue(C.AuthStatus, "AuthFeedback", s and 1 or 0)
   C.Status.Value = s and 0 or 2
+  --clears out all values once not authorized
+  if not s then 
+    C.PreviewImage.Style = rj.encode({
+      DrawChrome = false,
+      IconData = false,
+      Legend = ''
+    })
+    for idx = 1,4 do
+      self:updateAccordingToValue(C["CopyStream"][idx], "StateTriggers", 0)
+      C["StreamName"][idx].String = ""
+      if C["SysInfo"][idx] then C["SysInfo"][idx].Legend = "" end
+      self:updateAccordingToValue(C["RouteButton_1"][idx], "StateTriggers", 0)
+      self:updateAccordingToValue(C["RouteButton_2"][idx], "StateTriggers", 0)
+      self:updateAccordingToValue(C["AssignToPreview"][idx], "StateTriggers", 0)
+      C.CurrentStreamName.Legend = ""
+      for name, control in pairs(Controls) do if name:match("Current") then 
+        self:updateAccordingToValue(control, "StateTriggers", 0) 
+      end end
+    end
+  end
 end 
 
 function N:authFlow(inputData, fn)
-  self.Authorized = not inputData:match('<!DOCTYPE html>')
+  local doesNotReturnHtml = not inputData:match('<!DOCTYPE html>')
+  self.returnAuthorized = doesNotReturnHtml and inputData --means we are getting data, and its not an html page
   self:authFb(NVX.Authorized)
-  if not self.Authorized then 
+  if not self.returnAuthorized then 
     self:login({
-      eh = fn
+      eh = function()
+        if fn then fn() end
+      end
     })
-    -- return fn() 
   else 
-    return self.Authorized 
+    return self.returnAuthorized 
   end
 end
 
@@ -96,18 +117,16 @@ function N:login(o)
     Data = 'login='..self.un..'&&passwd='..self.pw,
     EventHandler = function (t,c,d,e,h)
       self.Authorized = h["Set-Cookie"] and c == 200
-      if c ~= 200 or not h["Set-Cookie"] then
-        local concat = self.SessionName or self.ip
-        print('Authentication Error with '..concat..'!')
-        self:authFb()
-      else
+      self:authFb(self.Authorized)
+      if self.Authorized then
         local str = ""
         for _, s in pairs(h["Set-Cookie"]) do str = str..s end
         self.Header.Cookie = str
-        if o.eh then 
-          return o.eh(t,c,d,e,h) 
-        end
+      else
+        if self.ip then print('Authentication Error with '..self.ip..'!') end
+        print(h["Set-Cookie"], c)
       end
+      if o.eh then return o.eh(t,c,d,e,h) end
     end
   })
 end
@@ -116,21 +135,20 @@ end
 function N:getConfigurationData(o)
   o = o or {}
   local url = o.subPath and self.Urls.base.."/"..o.subPath or self.Urls.base
-  if o.subPath then print('subPath: '..o.subPath) end
   HttpClient.Download {
     Url = url,
     Headers = self.Header,
     Timeout = o.timeout or 10,
     EventHandler = function(t,c,d,e,h)
-      self:authFlow(d, function() self:getConfigurationData(o) end)
+      self:authFlow(d)
       if not self.Authorized then 
-        print(self.ip.." is not logged in") 
+        if self.ip then print(self.ip.." is not logged in") end
       else
         if o.verbose then print('logged into '..self.Urls.base) end
       end
       if o.verbose then print(d) end
       if c ~= 200 then
-        print("Error getting data from "..url.." with code: "..c..":")
+        if self.ip then print("Error getting data from "..url.." with code: "..c..":") end
         print(e) 
       else
         local encodedData = rj.decode(d)
@@ -170,7 +188,7 @@ function N:postData(url, data, o)
         print("Error getting device info with code: "..c..":")
         print(e) 
       else
-        self:authFlow(d, function() self:postData(url, data, o) end)
+        self:authFlow(d)
         if not o.externalUrl then
           local encodedData = rj.decode(d)
           if not encodedData then print(url.." did not receive data") return false end
@@ -199,7 +217,6 @@ end
 function N:pollActiveSource(o)
   o = o or {}
   if not self.config.Device then print('cannot poll active source without config file loaded') return false end
-  print('updating '..self.ip..' to video source: '..self.config.Device.DeviceSpecific.ActiveVideoSource)
   self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
   if self.deviceMode == "Receiver" then
     self.routesControls = {
@@ -306,14 +323,23 @@ function N:assignPreviewToWindow(o)
         Legend = ''
       })
       if o.eh then o.eh(t2,c2,d2,e2,h2) end
-      self:pollPreviewButtons({idx = o.idx})
+      --recursion
+      if self.ip == NVX.mostRecentPreview then
+        NVX:pollPreviewButtons({idx = o.idx})
+        Timer.CallAfter(function()
+          self:getConfigurationData({
+            eh = function()
+              self:assignPreviewToWindow(o)
+            end
+          })
+        end, 5)
+      end
     end
   })
 end
 --update preview window
 function N:updatePreviewWindow(o)
-  print('updating preview window')
-  NVX.mostRecentPreview = self.id
+  NVX.mostRecentPreview = self.ip
   o = o or {}
   if not self.config then print('config file needs to be loaded to upload preview window') return false end
   self:getConfigurationData({
@@ -322,17 +348,6 @@ function N:updatePreviewWindow(o)
       self:assignPreviewToWindow(o)
     end
   })
-  --recursion
-  if self.id == NVX.mostRecentPreview then
-    print('updating preview window')
-    Timer.CallAfter(function()
-      self:getConfigurationData({
-        eh = function()
-          self:assignPreviewToWindow(o)
-        end
-      })
-    end, 5)
-  end
 end
 
 --save routes to system memory, location depends on whether live or emulating
@@ -342,6 +357,7 @@ function N:saveRouteToMemory(idx)
   local configData = self.externalStreams[sessionName]
   if not configData then
     print("You can't save a route with selecting from the dropdown box first ")
+    return false
   end
   self.savedRoutes[idx] = {
     SessionName = configData.SessionName,
@@ -349,7 +365,8 @@ function N:saveRouteToMemory(idx)
     MulticastAddress = configData.MulticastAddress,
     ip = configData.ip
   }
-  local routesFile = io.open("design/savedRoutes.json", "w")
+  -- local routesFile = io.open("design/savedRoutes.json", "w")
+  local routesFile = io.open(self.filePath, "w")
   if routesFile then
     routesFile:write(rj.encode(self.savedRoutes))
     routesFile:close()
@@ -362,16 +379,16 @@ end
 --retrieves routes from saved memory
 function N:retrieveSavedRoutesFromMemory(o)
   o = o or {}
-  local filePath = (function() if System.IsEmulating then return "design/savedRoutes.json" else return "media/savedRoutes.json" end end)()
+  self.filePath = "design/savedRoutes.json" and System.IsEmulating or "media/savedRoutes.json"
   local routesFileCheck, routesFile
-  if pcall(function()  assert(io.open(filePath, "r")) end) then 
-    print('found file '..filePath..':')
-    routesFileCheck = assert(io.open(filePath, "r"))
+  if pcall(function()  assert(io.open(self.filePath, "r")) end) then 
+    print('Found saved data file: '..self.filePath)
+    routesFileCheck = assert(io.open(self.filePath, "r"))
     routesFile = routesFileCheck:read("*all")
     self.savedRoutes = rj.decode(routesFile)
   else
-    print('did not find file '..filePath..'...creating one')
-    routesFileCheck = io.open(filePath, "w")
+    print('Did not find file '..filePath..'...creating one')
+    routesFileCheck = io.open(self.filePath, "w")
     self.savedRoutes = {}
   end
   routesFileCheck.close()
@@ -383,7 +400,7 @@ function N:buildDecoder()
 
   self:updateSystemInfo()
 
-  if not self.config.Device.DiscoveredStreams then print("gather discoveredStreams data first before populating streams list") return false end
+  if not self.config.Device.DiscoveredStreams then print("gather discoveredStreams data first before populating streams list") return end
   local streamsPulled = self.config.Device.DiscoveredStreams.Streams
   if streamsPulled == {} then print('no streams to acquire') return end
 
@@ -395,24 +412,23 @@ function N:buildDecoder()
     data.Address = "https://"..data.ip --removes other address field
     data.un = self.un
     data.pw = self.pw
-    local newInput = N:new(data)
-    local states = {
 
-    }
+    local newInput = N:new(data)
     newInput:login({
       eh = function() 
-        newInput:getConfigurationData({
-          eh = function()
-            newInput:updateDeviceType()
-          end
-        })
+        if not newInput.Authorized then
+          print(newInput.ip..' was discovered, but did not log in successfully!')
+        else
+          newInput:getConfigurationData({
+            eh = function()
+              newInput:updateDeviceType()
+            end
+          })
+        end
       end
     })
 
     self.externalStreams[data.SessionName] = newInput
-  end
-
-  for uuid, data in pairs(streamsPulled) do
     table.insert(self.dropdownList, data.SessionName)
   end
 
@@ -423,13 +439,16 @@ function N:buildDecoder()
         self.savedRoutes = self.savedRoutes or {}
         if self.savedRoutes[idx] then
           ct.String = self.savedRoutes[idx].SessionName
-          --add timer to wait for getConfigurationData()
-          Timer.CallAfter(function() self.externalStreams[ct.String]:pollActiveSource({idx = idx}) end, 5 )
         else
           ct.String = "" 
         end
         
         ct.Choices = self.dropdownList
+        
+        C.CopyStream[idx].Boolean = self.savedRoutes[idx]
+        C.CopyStream[idx].EventHandler = function(c)
+          self:saveRouteToMemory(idx)
+        end
 
         --preview button will assign preview
         C.AssignToPreview[idx].EventHandler = function(c)
@@ -437,6 +456,7 @@ function N:buildDecoder()
           newInput:login({
             eh = function(t,c,d,e,h)
               newInput:updatePreviewWindow({idx = idx})
+              newInput:pollActiveSource({idx = idx})
             end
           })
         end
@@ -454,10 +474,7 @@ function N:buildDecoder()
           end
         end
 
-        C.CopyStream[idx].Boolean = self.savedRoutes[idx]
-        C.CopyStream[idx].EventHandler = function(c)
-          self:saveRouteToMemory(idx)
-        end
+
 
       end
     end
@@ -481,11 +498,14 @@ function N:buildDecoder()
 
 end
 
-function N:Init()
+function N:openingComments()
+  local systemIp = Network.Interfaces()[1].Address
+  local systemStr = 'System is Emulating with IP address 'and System.IsEmulating or 'System is live with IP address '
+  print(systemStr..systemIp)
+  print("\nYou are now running a Q-Sys/Crestron NVX Demo script!\n\n- This is a Proof of Concept and should not be used in production!\n- If you discover any bugs, please report them as an issue in https://github.com/patrickgilsf/qNvx/issues.\n\nEnjoy!")
+end
 
-  if System.IsEmulating then
-    print('System is Emulating with IP address '..Network.Interfaces()[1].Address)
-  end
+function N:Init()
 
   NVX = N:new({
     ip = C.IP.String,
@@ -509,22 +529,7 @@ function N:Init()
 
 end
 
+N:openingComments()
 N:Init()
 
-
 return NVX
-
--- Controls.MyButton.Style = json.encode({
---   IconString = string.char(0xef,0x88,0x94), -- change icon (use icons.lua)
---   Legend = "MyButton",                      -- change button label
---   Color = "#123456,                         -- set button color
---   IconColor = "#654321",                    -- set icon color
---   DrawChrome = true,                        -- apply rendering styles
---   CornerRadius = math.random(0,24),         -- set corner radius
---   Margin = math.random(0,10),               -- set margin
---   Padding = math.random(0,24),              -- set padding
---   IconAlignment = "Right",                  -- align icon left/right
---   HorizontalAlignment = "Right",            -- align text left/center/right
---   StrokeColor = "#000000",                  -- set border color
---   StrokeWidth = math.random(0,10),          -- set border size
--- })
