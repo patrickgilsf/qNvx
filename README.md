@@ -29,7 +29,18 @@ To set up the development environment:
    node index.js
    ```
 
-The build process lets you alter the code from you IDE, if you want to make an edit (suggest a PR if so!)
+## Development Setup
+
+If you want to use the build environment for development:
+
+1. Create a `.env` file in the root directory with the following structure:
+```
+qUsername=<your username>
+qPassword=<your password>
+```
+Replace `<your username>` and `<your password>` with your actual credentials.
+
+Note: The `.env` file is only required if you plan to use the build environment. If you're just using the .quc file directly in Q-Sys Designer, you can skip this step.
 
 ## Module Usage
 
