@@ -1,10 +1,10 @@
 # qNVX - Q-Sys to Crestron NVX Control Module
 
-This Q-Sys module enables seamless control integration between Q-Sys Core processors and Crestron NVX devices. It allows Q-Sys systems to control and manage Crestron NVX endpoints for AV-over-IP applications.
+This is Crestron control module for Q-Sys. There is also a build and deploy environment for modificatin with your IDE. OR, simply download the .quc file and enjoy!
 
 ## Overview
 
-- **Q-Sys Integration**: Compatible with Q-Sys Core processors ([Core Feature Comparison](https://www.qscaudio.com/resource-files/productresources/dn/dsp_cores/q_dn_core_comparison_chart.pdf))
+- **Q-Sys Integration**: Compatible with Q-Sys Core processors
 - **Crestron Control**: Enables control of [Crestron DM-NVX Series](https://www.crestron.com/Products/Featured-Solutions/DigitalMedia-NVX-Series) devices
 - **Easy Installation**: Deployable as a .quc module in Q-Sys Designer
 

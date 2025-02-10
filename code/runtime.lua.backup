@@ -27,17 +27,12 @@ function N:new(o)
   o.AuthFeedback = {
     [0] = {
       Color = "Red",
-      Legend = "<<Auth Error!>>"
+      String = "<<Auth Error!>>"
     },
     [1] = {
       Color = "Green",
-      Legend = "Authorized"
-    },
-    [2] = {
-      Color = "Yellow",
-      Legend = "Initializing..."
+      String = "Authorized"
     }
-
   }
   o.Authorized = false
   --these controls will re-initalize
@@ -51,32 +46,29 @@ function N:new(o)
   return o
 end
 
---clear out vales
-function N:clearDecoderValues()
-  C.PreviewImage.Style = rj.encode({
-    DrawChrome = false,
-    IconData = false,
-    Legend = ''
-  })
-  for idx = 1,4 do
-    self:updateAccordingToValue(C["CopyStream"][idx], "StateTriggers", 0)
-    C["StreamName"][idx].String = ""
-    if C["SysInfo"][idx] then C["SysInfo"][idx].String = "" end
-    self:updateAccordingToValue(C["RouteButton_1"][idx], "StateTriggers", 0)
-    self:updateAccordingToValue(C["RouteButton_2"][idx], "StateTriggers", 0)
-    self:updateAccordingToValue(C["AssignToPreview"][idx], "StateTriggers", 0)
-    C.CurrentStreamName.Legend = ""
-    for name, control in pairs(Controls) do 
-      if name:match("Current") then self:updateAccordingToValue(control, "StateTriggers", 0) end 
-    end
-  end
-end
-
 function N:authFb(s)
   self:updateAccordingToValue(C.AuthStatus, "AuthFeedback", s and 1 or 0)
   C.Status.Value = s and 0 or 2
-  --clears out all values if not authorized
-  if not s then self:clearDecoderValues() end
+  --clears out all values once not authorized
+  if not s then 
+    C.PreviewImage.Style = rj.encode({
+      DrawChrome = false,
+      IconData = false,
+      Legend = ''
+    })
+    for idx = 1,4 do
+      self:updateAccordingToValue(C["CopyStream"][idx], "StateTriggers", 0)
+      C["StreamName"][idx].String = ""
+      if C["SysInfo"][idx] then C["SysInfo"][idx].Legend = "" end
+      self:updateAccordingToValue(C["RouteButton_1"][idx], "StateTriggers", 0)
+      self:updateAccordingToValue(C["RouteButton_2"][idx], "StateTriggers", 0)
+      self:updateAccordingToValue(C["AssignToPreview"][idx], "StateTriggers", 0)
+      C.CurrentStreamName.Legend = ""
+      for name, control in pairs(Controls) do if name:match("Current") then 
+        self:updateAccordingToValue(control, "StateTriggers", 0) 
+      end end
+    end
+  end
 end 
 
 function N:authFlow(inputData, fn)
@@ -104,6 +96,14 @@ function N:printConfig(subPath)
   local path
   if subPath then path = self.config.Device[subPath] else path = self.config.Device end
   print(rj.encode(path, {pretty=true}))
+end
+
+--get type ("Transmitter or Receiver")
+function N:updateDeviceType()
+  if not self.config.Device.DeviceSpecific then print("no device specific data") return false end
+  self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
+  self.deviceMode = self.config.Device.DeviceSpecific.DeviceMode --shorthand
+  return type
 end
 
 --login
@@ -137,7 +137,7 @@ end
 function N:getConfigurationData(o)
   o = o or {}
   local url = o.subPath and self.Urls.base.."/"..o.subPath or self.Urls.base
-  if o.verbose then print('making request from '..url) end
+  print('making request from '..url)
   HttpClient.Download {
     Url = url,
     Headers = self.Header,
@@ -160,7 +160,6 @@ function N:getConfigurationData(o)
           self.config.Device[o.subPath] = encodedData["Device"][o.subPath]
         else
           self.config = encodedData
-          self:updateButtonFeedback()
         end
         if o.eh then 
           return o.eh(t,c,d,e,h)
@@ -204,8 +203,8 @@ function N:postData(url, data, o)
   }
 end
 
---all things feedback
-function N:pollSystemInfo()
+--update system information in system window
+function N:updateSystemInfo()
   local subPath = self.config.Device.DeviceInfo
   local sysInfo = {
     subPath.Model,
@@ -216,7 +215,10 @@ function N:pollSystemInfo()
     control.String = sysInfo[index]
   end
 end
-function N:pollActiveSource(idx)
+
+--updates polling for buttons between stream, hdmi 1 and hdmi 2 (decoder) and hdmi 1 and hdmi 2 (encoder)
+function N:pollActiveSource(o)
+  o = o or {}
   if not self.config.Device then print('cannot poll active source without config file loaded') return false end
   self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
   if self.deviceMode == "Receiver" then
@@ -226,7 +228,7 @@ function N:pollActiveSource(idx)
       ["CurrentRouteButton_2"] = "Input2"
     }
   elseif self.deviceMode == "Transmitter" then
-    if not idx then print('index needed to update polling for '..self.SessionName) return false end
+    if not o.idx then print('index needed to update polling for '..self.SessionName) return false end
     self.routesControls = {
       ["RouteButton_1"] = "Input1",
       ["RouteButton_2"] = "Input2"
@@ -234,69 +236,176 @@ function N:pollActiveSource(idx)
   end
   for controlName, source in pairs(self.routesControls) do
     local control
-    if idx then control = C[controlName][idx] else control = C[controlName]  end
+    if o.idx then control = C[controlName][o.idx] else control = C[controlName] end
     control.Value = source == self.activeVideoInput and 1 or 0
     self:updateAccordingToValue(control, "StateTriggers", control.Value)
   end
 end
-function N:pollActiveStream()
-  if self.deviceMode ~= "Receiver" then return end
+
+--find stream and route, update buttons
+function N:updateDecoderValues()
+  self:pollActiveSource()
+
+  --route
   local routingTable = self.config.Device.AvRouting.Routes
   if #routingTable > 1 then print('multiple routes found, return first one') end
-  local streamName = function()
-    for sessionName, data in pairs(self.externalStreams) do
-      if routingTable[1].VideoSource == data.id then 
-        return "Stream: "..sessionName
-      end
+  self.route = routingTable[1].VideoSource
+  for sessionName, data in pairs(self.externalStreams) do
+    if self.route == data.id then
+      self.currentStream = sessionName
+      C.CurrentStreamName.Legend = "Stream: "..self.currentStream
+      return data.id
     end
-    return "Stream: ".."<<NONE>>"
   end
-  if self.externalStreams then C.CurrentStreamName.Legend = streamName() end 
+  C.CurrentStreamName.Legend = "No Stream Routes"
+  self.currentStream = false
+  return false
+
 end
-function N:pollPreviewButtons(pre)
-  if not self.currentPreview then return end
-  self:updateAccordingToValue(C.CurrentPreview, "StateTriggers", self.currentPreview == "Main" and 1 or 0)
-  for idx, ctl in pairs(C.AssignToPreview) do self:updateAccordingToValue(ctl, "StateTriggers", self.currentPreview == idx and 1 or 0) end
-end
---attached to every get request
-function N:updateButtonFeedback(o)
+
+--switch input
+function N:switchInput(input, idx, o)
   o = o or {}
-  self.deviceMode = self.config.Device.DeviceSpecific.DeviceMode
-  self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
-  self:pollActiveSource(self.lastInput or false)
-  self:pollActiveStream()
-  NVX:pollPreviewButtons()
-  if NVX.currentPreview == "Main" then NVX:assignPreviewToWindow() else self:assignPreviewToWindow(self.currentPreview) end
+  
+  -- Validate input
+  if not input then 
+    print("Error: Input source required")
+    return false
+  end
+
+  -- Prepare request data
+  local data = '{"Device": {"DeviceSpecific": {"VideoSource": "'..input..'"}}}'
+  
+  -- Track request state
+  local requestComplete = false
+  local retryCount = 0
+  local maxRetries = 2
+
+  -- Function to handle the request with retries
+  local function makeRequest()
+    self:postData("/DeviceSpecific/VideoSource", data, {
+      eh = function(t,c,d,e,h)
+        if c ~= 200 then
+          retryCount = retryCount + 1
+          if retryCount <= maxRetries then
+            print("Retry attempt " .. retryCount)
+            Timer.CallAfter(makeRequest, 1)
+            return
+          end
+          print("Failed to switch input after " .. maxRetries .. " attempts")
+          return
+        end
+
+        -- Update UI elements efficiently using debouncing
+        self:debounce("preview_update", function()
+          self:updatePreviewWindowWithCache({
+            eh = function()
+              if idx then
+                self:pollActiveSource({idx = idx})
+              else
+                self:pollActiveSource()
+              end
+              if o.eh then o.eh() end
+            end
+          })
+        end)
+      end
+    })
+  end
+
+  -- Start the request process
+  makeRequest()
+end
+
+-- Cache for preview data to avoid unnecessary requests
+N.previewCache = {
+  data = nil,
+  timestamp = 0,
+  maxAge = 5 -- seconds
+}
+
+-- Debounce helper to prevent too frequent UI updates
+function N:debounce(key, fn, delay)
+  if self.debounceTimers == nil then self.debounceTimers = {} end
+  if self.debounceTimers[key] then Timer.Cancel(self.debounceTimers[key]) end
+  self.debounceTimers[key] = Timer.CallAfter(fn, delay or 0.5)
+end
+
+-- Helper to check if preview cache is valid
+function N:isPreviewCacheValid()
+  return self.previewCache.data and 
+         (os.time() - self.previewCache.timestamp) < self.previewCache.maxAge
+end
+
+-- Update preview with caching
+function N:updatePreviewWindowWithCache(o)
+  o = o or {}
+  NVX.mostRecentPreview = self.ip
+  
+  if self:isPreviewCacheValid() then
+    C.PreviewImage.Style = self.previewCache.data
+    if o.eh then o.eh() end
+    return
+  end
+
+  if not self.config then 
+    print('config file needs to be loaded to upload preview window') 
+    return false 
+  end
+
+  self:getConfigurationData({
+    eh = function()
+      local path = self.config.Device.Preview.ImageList.Image3.IPv4Path
+      HttpClient.Download({
+        Url = path,
+        Headers = self.Header,
+        Timeout = o.timeout or 10,
+        EventHandler = function(t,c,d,e,h)
+          if c == 200 then
+            local style = rj.encode({
+              DrawChrome = false,
+              IconData = Crypto.Base64Encode(d),
+              Legend = ''
+            })
+            -- Update cache
+            self.previewCache.data = style
+            self.previewCache.timestamp = os.time()
+            C.PreviewImage.Style = style
+          else
+            print("Error updating preview: " .. (e or "Unknown error"))
+          end
+          if o.eh then o.eh() end
+        end
+      })
+    end
+  })
 end
 
 --route video from streams, according to uuid
 function N:routeFromStream(uuid)
+  if self.activeVideoInput ~= "Stream" then self:switchInput("Stream") end 
   local data = [=[{"Device": {"AvRouting": {"Routes": [{"VideoSource": "]=]..uuid..[=["}]}}}]=]
-  self:postData("/AvRouting/Routes", data, {
-    eh = function() NVX:getConfigurationData() end
+  self:postData("/AvRouting/Routes", data)
+  self:getConfigurationData({
+    eh = function(t,c,d,e,h)
+      self:updateDecoderValues()
+    end
   })
 end
 
-function N:switchInput(input, id)
-  if input ~= self.activeVideoInput then 
-    local data = '{"Device": {"DeviceSpecific": {"VideoSource": "'..input..'"}}}'
-    self:postData("/DeviceSpecific/VideoSource", data, {
-      eh = function(t,c,d,e,h)
-        self:getConfigurationData({
-          eh = function()
-            if id then NVX:routeFromStream(id) end
-          end
-        }) 
-      end
-    })
-  else
-    self:getConfigurationData({
-      eh = function() if id then NVX:routeFromStream(id) end
+--update state triggers for preview
+function N:pollPreviewButtons(o)
+  o = o or {}
+  -- C.CurrentPreview.Value = o.idx and 0 or 1
+  self:updateAccordingToValue(C.CurrentPreview, "StateTriggers", o.idx and 0 or 1)
+  for idx, ctl in pairs(C.AssignToPreview) do
+    if o.idx then 
+      self:updateAccordingToValue(ctl, "StateTriggers", o.idx == idx and 1 or 0)
+    else
+      self:updateAccordingToValue(ctl, "StateTriggers", 0)
     end
-    })
   end
 end
-
 function N:assignPreviewToWindow(o)
   o = o or {}
   local path = self.config.Device.Preview.ImageList.Image3.IPv4Path
@@ -311,15 +420,27 @@ function N:assignPreviewToWindow(o)
         Legend = ''
       })
       if o.eh then o.eh(t2,c2,d2,e2,h2) end
+      --recursion
+      -- if self.ip == NVX.mostRecentPreview then
+      --   NVX:pollPreviewButtons({idx = o.idx})
+      --   Timer.CallAfter(function()
+      --     self:getConfigurationData({
+      --       eh = function()
+      --         self:assignPreviewToWindow(o)
+      --       end
+      --     })
+      --   end, 5)
+      -- end
     end
   })
 end
 --update preview window
 function N:updatePreviewWindow(o)
-  NVX.currentPreview = o and o.idx or "Main"
+  NVX.mostRecentPreview = self.ip
   o = o or {}
   if not self.config then print('config file needs to be loaded to upload preview window') return false end
   self:getConfigurationData({
+    -- subPath = "Preview",
     eh = function()
       self:assignPreviewToWindow(o)
       if o.eh then o.eh() end
@@ -346,7 +467,7 @@ function N:saveRouteToMemory(idx)
   if routesFile then
     routesFile:write(rj.encode(self.savedRoutes))
     routesFile:close()
-    self:updateAccordingToValue(C.CopyStream[idx], "StateTriggers", 1)
+    C.CopyStream[idx].Value = 1
   else
     print('cound not open file')
   end
@@ -371,106 +492,126 @@ function N:retrieveSavedRoutesFromMemory(o)
   if o.eh then return o.eh() else return routesFile end
 end
 
---sets up transmitter 
-function N:initializeTransmitter(idx)
-  if self.inputTable then table.insert(self.inputTable, idx) else self.inputTable = {idx} end
-  self.lastInput = idx
-  if not idx then print('index needed to initialize transmitter') return false end
-  self:login({
-    eh = function() 
-      if not self.Authorized then
-        print(self.ip..' was discovered, but did not log in successfully!')
-      else
-        self:getConfigurationData()
-      end
-    end
-  }) 
-end
+-- finish building stream environment
+function N:buildDecoder()
 
--- sets up main receiver
-function N:initializeMainRecevier()
+  self:updateSystemInfo()
 
-  --add system info to plugin pane
-  self:pollSystemInfo()
-
-  --Authorization button will re-initialize script
-  C.AuthStatus.EventHandler = function()
-      N:Init()
-  end
-
-  --gather discovered streams
   if not self.config.Device.DiscoveredStreams then print("gather discoveredStreams data first before populating streams list") return end
   local streamsPulled = self.config.Device.DiscoveredStreams.Streams
   if streamsPulled == {} then print('no streams to acquire') return end
 
-  --new N instance for any stream discovered
   self.externalStreams, self.dropdownList = {}, {}
+
   for uuid, data in pairs(streamsPulled) do
+
     data.id = uuid
     data.ip = data.Address:match("^https?://([^/]+)/onvif/services$".."")    
     data.Address = "https://"..data.ip --removes other address field
     data.un = self.un
     data.pw = self.pw
+
     local newInput = N:new(data)
+    newInput:login({
+      eh = function() 
+        if not newInput.Authorized then
+          print(newInput.ip..' was discovered, but did not log in successfully!')
+        else
+          newInput:getConfigurationData({
+            eh = function()
+              newInput:updateDeviceType()
+            end
+          })
+        end
+      end
+    })
+
     self.externalStreams[data.SessionName] = newInput
+
     table.insert(self.dropdownList, data.SessionName)
   end
 
-  --helper function looks up streams in table
-  local function isDiscoveredStream(sessionName)
-    for __,session in pairs(self.dropdownList) do 
-        if session == sessionName then return true end
+  local function includedInDropdownList(inputItem, tbl)
+    for idx, item in pairs(tbl) do
+      if item == inputItem then return true end
     end
+    print('didnt find anything')
     return false
   end
   
-  --compare discovered streams against saved streams
-  for idx, stream in pairs(self.savedRoutes) do
-    self:updateAccordingToValue(C.CopyStream[idx], "StateTriggers", 0)
-    if isDiscoveredStream(stream.SessionName) then
-      C.StreamName[idx].String = stream.SessionName
-      self:updateAccordingToValue(C.CopyStream[idx], "StateTriggers", 1)
-      local newInput= self.externalStreams[stream.SessionName]
-      newInput:initializeTransmitter(idx)      
-    end
-  end
 
-  --iterate through 4 controls with saved data
-  for idx, ct in pairs(C.StreamName) do
-    ct.Choices = self.dropdownList
-    ct.EventHandler = function()
-      self:updateAccordingToValue(C.CopyStream[idx], "StateTriggers", 0)
-      self.externalStreams[ct.String]:initializeTransmitter(idx) 
-    end        
-    C.CopyStream[idx].EventHandler = function() self:saveRouteToMemory(idx) end
-    C.AssignToPreview[idx].EventHandler = function(c)
-      self.externalStreams[ct.String]:updatePreviewWindow({idx = idx})
+
+  self:retrieveSavedRoutesFromMemory({
+    eh = function()
+      for idx, ct in pairs(C.StreamName) do
+        local sIdx = tostring(idx)
+        self.savedRoutes = self.savedRoutes or {}
+
+        if self.savedRoutes[idx] and includedInDropdownList(self.savedRoutes[idx].SessionName, self.dropdownList) then
+          ct.String = self.savedRoutes[idx].SessionName
+          self.externalStreams[self.savedRoutes[idx].SessionName]:pollActiveSource({idx = idx})
+        else
+          ct.String = "" 
+        end
+
+
+        ct.Choices = self.dropdownList
+        
+        C.CopyStream[idx].Boolean = self.savedRoutes[idx]
+        C.CopyStream[idx].EventHandler = function(c)
+          self:saveRouteToMemory(idx)
+        end
+
+        --preview button will assign preview
+        C.AssignToPreview[idx].EventHandler = function(c)
+          local newInput = self.externalStreams[ct.String]
+          newInput:login({
+            eh = function(t,c,d,e,h)
+              newInput:updatePreviewWindow({idx = idx})
+              newInput:pollActiveSource({idx = idx})
+            end
+          })
+        end
+
+        --set encoder's routing buttons
+        for hdmiIdx = 1, 2 do
+          local btn = C["RouteButton_"..hdmiIdx][idx]
+          btn.Legend = "HDMI "..hdmiIdx
+          btn.EventHandler = function(c)
+            if ct.String == "" then print('you must choose a stream before you can route') return false end
+            local tx = self.externalStreams[ct.String]
+            print(tx.activeVideoInput)
+            local id = tx.id
+            local videoInputString = "Input"..hdmiIdx
+            if tx.config.Device.DeviceSpecific.ActiveVideoSource ~= videoInputString then
+              tx:switchInput(videoInputString, idx, {
+                eh = function()
+                  self:routeFromStream(id)
+                end
+              })
+            else
+              self:routeFromStream(id)
+            end                    
+          end
+        end
+      end
     end
-    for hdmiIdx = 1, 2 do 
-      local btn = C["RouteButton_"..hdmiIdx][idx]
-      btn.Legend = "HDMI "..hdmiIdx
-      btn.EventHandler = function(c)
-        if ct.String == "" then print('you must choose a stream before you can route') return false end
-        local tx = self.externalStreams[ct.String]
-        tx:switchInput("Input"..hdmiIdx, tx.id)
-      end            
-    end
-  end
+  })
+
+  self:updateDecoderValues()
   
-  --setup "Current Stream" section 
-  for controlName, source in pairs(self.routesControls) do
-    local control = C[controlName]
-    if source == "Stream" then 
-      self:pollActiveStream()
-    else
-      control.Legend = "HDMI "..source:match("%d")
-    end
-    control.EventHandler = function()
-      self:switchInput(source)
+  C.CurrentStreamName.EventHandler = function(c)
+    self:switchInput("Stream")
+  end
+
+  for hdmi = 1, 2 do 
+    local btn = C["CurrentRouteButton_"..hdmi]
+    btn.Legend = "HDMI "..hdmi
+    btn.EventHandler = function(c)
+      self:switchInput("Input"..hdmi)
     end
   end
 
-  self:updatePreviewWindow()
   C.CurrentPreview.EventHandler = function() self:updatePreviewWindow() end
 
 end
@@ -489,30 +630,21 @@ function N:Init()
     un = C.Username.String,
     pw = C.Password.String
   })
-
-  --initialization feedback
-  NVX:updateAccordingToValue(C.AuthStatus, "AuthFeedback", 2)
   
-  --clear values before starting
-  NVX:clearDecoderValues()
-
   NVX:login({
     eh = function()
-      if not NVX.Authorized then print('Receiver is not logged in!') return end
-      --clear values before starting
-      -- NVX:clearDecoderValues()
+      if NVX.Authorized then print('Reciever is logged in!') end
       NVX:getConfigurationData({
         eh = function()
-          NVX:retrieveSavedRoutesFromMemory({
-            eh = function() NVX:initializeMainRecevier() end
-          })          
+          NVX:updateDeviceType()
+          NVX:buildDecoder()
+          NVX:updatePreviewWindow()
         end
       })
     end
   })
 
   for name, boolean in pairs(NVX.reInits) do C[name].EventHandler = function() N:Init() end end
-  
 
 end
 
