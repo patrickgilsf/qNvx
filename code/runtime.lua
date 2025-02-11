@@ -355,7 +355,7 @@ end
 --retrieves routes from saved memory
 function N:retrieveSavedRoutesFromMemory(o)
   o = o or {}
-  self.filePath = "design/savedRoutes.json" and System.IsEmulating or "media/savedRoutes.json"
+  self.filePath = System.IsEmulating and "design/savedRoutes.json" or "media/savedRoutes.json"
   local routesFileCheck, routesFile
   if pcall(function()  assert(io.open(self.filePath, "r")) end) then 
     print('Found saved data file: '..self.filePath)
@@ -363,7 +363,7 @@ function N:retrieveSavedRoutesFromMemory(o)
     routesFile = routesFileCheck:read("*all")
     self.savedRoutes = rj.decode(routesFile)
   else
-    print('Did not find file '..filePath..'...creating one')
+    print('Did not find file '..self.filePath..'...creating one')
     routesFileCheck = io.open(self.filePath, "w")
     self.savedRoutes = {}
   end
@@ -425,6 +425,7 @@ function N:initializeMainRecevier()
   end
   
   --compare discovered streams against saved streams
+  if not self.savedRoutes then self.savedRoutes = {} end
   for idx, stream in pairs(self.savedRoutes) do
     self:updateAccordingToValue(C.CopyStream[idx], "StateTriggers", 0)
     if isDiscoveredStream(stream.SessionName) then
@@ -477,7 +478,7 @@ end
 
 function N:openingComments()
   local systemIp = Network.Interfaces()[1].Address
-  local systemStr = 'System is Emulating with IP address 'and System.IsEmulating or 'System is live with IP address '
+  local systemStr = System.IsEmulating and 'System is Emulating with IP address ' or 'System is live with IP address '
   print(systemStr..systemIp)
   print("\nYou are now running a Q-Sys/Crestron NVX Demo script!\n\n- This is a Proof of Concept and should not be used in production!\n- If you discover any bugs, please report them as an issue in https://github.com/patrickgilsf/qNvx/issues.\n\nEnjoy!")
 end
@@ -497,10 +498,10 @@ function N:Init()
   NVX:clearDecoderValues()
 
   NVX:login({
+    
     eh = function()
       if not NVX.Authorized then print('Receiver is not logged in!') return end
       --clear values before starting
-      -- NVX:clearDecoderValues()
       NVX:getConfigurationData({
         eh = function()
           NVX:retrieveSavedRoutesFromMemory({
