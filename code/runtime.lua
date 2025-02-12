@@ -219,6 +219,7 @@ end
 function N:pollActiveSource(idx)
   if not self.config.Device then print('cannot poll active source without config file loaded') return false end
   self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
+  self.outputIsDisabled = self.config.Device.AudioVideoInputOutput.Outputs[1].Ports[1].Hdmi.IsOutputDisabled
   if self.deviceMode == "Receiver" then
     self.routesControls = {
       ["CurrentStreamName"] = "Stream",
@@ -234,8 +235,12 @@ function N:pollActiveSource(idx)
   end
   for controlName, source in pairs(self.routesControls) do
     local control
-    if idx then control = C[controlName][idx] else control = C[controlName]  end
-    control.Value = source == self.activeVideoInput and 1 or 0
+    if idx then control = C[controlName][idx] else control = C[controlName] end
+    if self.deviceMode == "Receiver" and self.outputIsDisabled then 
+      control.Value = 0
+    else
+      control.Value = source == self.activeVideoInput and 1 or 0
+    end
     self:updateAccordingToValue(control, "StateTriggers", control.Value)
   end
 end
@@ -277,6 +282,7 @@ function N:routeFromStream(uuid)
   })
 end
 
+--switches a local input
 function N:switchInput(input, id)
   if input ~= self.activeVideoInput then 
     local data = '{"Device": {"DeviceSpecific": {"VideoSource": "'..input..'"}}}'
@@ -295,6 +301,14 @@ function N:switchInput(input, id)
     end
     })
   end
+end
+
+--disables the main output https://github.com/patrickgilsf/qNvx/issues/2
+function N:disableMainOutput(disabled)
+  local data = [=[{"Device":{"AudioVideoInputOutput":{"Outputs":[{"Ports":[{"Hdmi":{"IsOutputDisabled":]=]..tostring(disabled)..[=[}}]}]}}}]=]
+  NVX:postData("/AudioVideoInputOutput/Outputs", data, {
+    eh = function() self:getConfigurationData() end
+  })
 end
 
 function N:assignPreviewToWindow(o)
@@ -467,7 +481,12 @@ function N:initializeMainRecevier()
       control.Legend = "HDMI "..source:match("%d")
     end
     control.EventHandler = function()
-      self:switchInput(source)
+      if control.Value == 0 then
+        if self.outputIsDisabled then self:disableMainOutput(false) end 
+        self:switchInput(source)
+      elseif control.Value == 1 then
+        self:disableMainOutput(true)
+      end
     end
   end
 
@@ -498,7 +517,7 @@ function N:Init()
   NVX:clearDecoderValues()
 
   NVX:login({
-    
+
     eh = function()
       if not NVX.Authorized then print('Receiver is not logged in!') return end
       --clear values before starting
