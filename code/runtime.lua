@@ -197,7 +197,6 @@ function N:postData(url, data, o)
           local encodedData = rj.decode(d)
           if not encodedData then print(url.." did not receive data") return false end
         end
-        if o.recurse then Timer.CallAfter(function() self:getData(url, o) end, o.recursionTime or 20) end
         if o.eh then return o.eh(t,c,d,e,h) end  
       end
     end
@@ -218,7 +217,7 @@ function N:pollSystemInfo()
 end
 function N:pollActiveSource(idx)
   if not self.config.Device then print('cannot poll active source without config file loaded') return false end
-  self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
+  self.activeVideoInput = (function() if self.config.Device.DeviceSpecific.ActiveVideoSource then return self.config.Device.DeviceSpecific.ActiveVideoSource end end)()
   self.outputIsDisabled = self.config.Device.AudioVideoInputOutput.Outputs[1].Ports[1].Hdmi.IsOutputDisabled
   if self.deviceMode == "Receiver" then
     self.routesControls = {
@@ -227,7 +226,7 @@ function N:pollActiveSource(idx)
       ["CurrentRouteButton_2"] = "Input2"
     }
   elseif self.deviceMode == "Transmitter" then
-    if not idx then print('index needed to update polling for '..self.SessionName) return false end
+    if not idx then print('index needed to update polling for '..self.ip) return false end
     self.routesControls = {
       ["RouteButton_1"] = "Input1",
       ["RouteButton_2"] = "Input2"
@@ -415,7 +414,7 @@ function N:initializeMainRecevier()
   --gather discovered streams
   if not self.config.Device.DiscoveredStreams then print("gather discoveredStreams data first before populating streams list") return end
   local streamsPulled = self.config.Device.DiscoveredStreams.Streams
-  if streamsPulled == {} then print('no streams to acquire') return end
+  if streamsPulled == {} or not streamsPulled then print('no streams to acquire') return end
 
   --new N instance for any stream discovered
   self.externalStreams, self.dropdownList = {}, {}
