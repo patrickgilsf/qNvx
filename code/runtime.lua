@@ -226,7 +226,7 @@ function N:pollActiveSource(idx)
       ["CurrentRouteButton_2"] = "Input2"
     }
   elseif self.deviceMode == "Transmitter" then
-    if not idx then print('index needed to update polling for '..self.SessionName) return false end
+    if not idx then print('index needed to update polling for '..self.ip) return false end
     self.routesControls = {
       ["RouteButton_1"] = "Input1",
       ["RouteButton_2"] = "Input2"
@@ -414,7 +414,7 @@ function N:initializeMainRecevier()
   --gather discovered streams
   if not self.config.Device.DiscoveredStreams then print("gather discoveredStreams data first before populating streams list") return end
   local streamsPulled = self.config.Device.DiscoveredStreams.Streams
-  if streamsPulled == {} then print('no streams to acquire') return end
+  if streamsPulled == {} or not streamsPulled then print('no streams to acquire') return end
 
   --new N instance for any stream discovered
   self.externalStreams, self.dropdownList = {}, {}
