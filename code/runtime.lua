@@ -197,7 +197,6 @@ function N:postData(url, data, o)
           local encodedData = rj.decode(d)
           if not encodedData then print(url.." did not receive data") return false end
         end
-        if o.recurse then Timer.CallAfter(function() self:getData(url, o) end, o.recursionTime or 20) end
         if o.eh then return o.eh(t,c,d,e,h) end  
       end
     end
@@ -218,7 +217,7 @@ function N:pollSystemInfo()
 end
 function N:pollActiveSource(idx)
   if not self.config.Device then print('cannot poll active source without config file loaded') return false end
-  self.activeVideoInput = self.config.Device.DeviceSpecific.ActiveVideoSource
+  self.activeVideoInput = (function() if self.config.Device.DeviceSpecific.ActiveVideoSource then return self.config.Device.DeviceSpecific.ActiveVideoSource end end)()
   self.outputIsDisabled = self.config.Device.AudioVideoInputOutput.Outputs[1].Ports[1].Hdmi.IsOutputDisabled
   if self.deviceMode == "Receiver" then
     self.routesControls = {

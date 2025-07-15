@@ -6,11 +6,15 @@ dotenv.config();
 let core = new Core({
   username: process.env.qUsername,
   pw: process.env.qPassword,
-  ip: "192.168.42.148",
+  ip: "", //add your IP address here
   comp: "qNVX"
 });
 
 const pullRuntime = async () => {
+  if (this.ip == "") {
+    console.log('add an ip address in index.js to push code')
+    return;
+  };
   console.log(`Pulling code from ${core.comp}...`);
   let comps = await core.retrieve();
   let rtn = {};
@@ -26,6 +30,10 @@ const pullRuntime = async () => {
 };
 
 const pushFromFile = async () => {
+  if (this.ip == "") {
+    console.log('add an ip address in index.js to push code')
+    return;
+  };
   const path = `./code/runtime.lua`;
   let updatedToCore, errorCount, logs;
   try {
@@ -53,6 +61,10 @@ const pushFromFile = async () => {
 };
 
 const getConfig = async () => {
+  if (this.ip == "") {
+    console.log('add an ip address in index.js to push code')
+    return;
+  };
   const code = await core.retrieve();
   console.log(code);
   return code;
